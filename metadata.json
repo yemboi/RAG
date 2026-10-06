@@ -1,0 +1,6 @@
+{
+  "name": "Document Collection Q&A (RAG)",
+  "description": "Conversational AI assistant powered by RAG across your document collection with multi-turn chat, source citations, and knowledge base management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
