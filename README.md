@@ -99,76 +99,49 @@ npm start # runs: python3 server.py --port 3000
 To graduate this MVP to an enterprise-grade multi-tenant production system:
 
 1. **Storage & Database Partitioning**:
-   - **Document Storage**: Offload raw files from container memory to object storage (**Google Cloud Storage** or **AWS S3**) with pre-signed upload URLs to reduce backend memory pressure.
-   - **Vector Database**: Replace the in-memory array with a managed vector database (**pgvector on Cloud SQL / AWS RDS Aurora**, **Pinecone**, or **Qdrant**) using HNSW indexing for sub-10ms nearest-neighbor search across millions of chunks.
-   - **Metadata & History**: Store user chat sessions and audit logs in a transactional database (PostgreSQL or Firestore) partitioned by `tenant_id` and `user_id`.
+There are 4 major considerations when productionizing this application. Storage would be key to this; with the large number of raw files that is going to be uploaded Cloud object storage would be a consideration. There are a number of Cloud storage provides that offer secure state of the art storage for unstructured files. The most notable of these products is Amazon S3; the most popular cloud storage due to its pre-signed upload URL’s and elastic space which makes it more cost effective than other provider’s. User chat sessions would be stored using a database provider such as Postrgress or Firestore.	 
 
-2. **Asynchronous Ingestion Pipeline**:
-   - Move document parsing (especially large multi-hundred-page PDFs) out of the synchronous HTTP request cycle into an asynchronous task queue (e.g., **Google Cloud Tasks / Pub/Sub + Celery worker**).
-   - Compute and store chunk embeddings once at ingestion time rather than processing on-demand.
+Due to the potential size of documents that are going to be parsed in this application it wouldn’t make sense to rely on HTTP request cycles. Asynchronous tasks enable compute and store chunk embeddings once at ingestion rather than processing on-demand. Google run cloud can be used for Containerisation, users’ authorization will be role based providing access to chosen workspaces or folders using Firebase Auth, Auth0, or AWS Cognito.
 
-3. **Containerization & Autoscaling**:
-   - Deploy as a stateless container on **Google Cloud Run** or **AWS ECS Fargate** with autoscaling configured from 1 to N instances behind a Cloud Load Balancer with SSL termination and CDN edge caching for static assets.
-
-4. **Authentication & Multi-Tenant Authorization**:
-   - Integrate OAuth 2.0 / OIDC (Firebase Auth, Auth0, or AWS Cognito) with Role-Based Access Control (RBAC) so users only retrieve documents within their authorized workspace or folder.
 
 ---
 
 ## 4. RAG / LLM Approach & Technical Decisions
 
-| Dimension | Choices Considered | Final Choice | Rationale |
-| :--- | :--- | :--- | :--- |
-| **LLM Model** | GPT-4o, Claude 3.5 Sonnet, Gemini 2.5 Flash, Gemini 3.8 Flash | **Gemini 3.8 Flash** (`@google/genai`) | Exceptional reasoning speed, low latency, 1M+ token context window, native multimodal understanding for document/PDF fallbacks, and cost-efficiency. |
-| **Chunking Strategy** | Fixed-size character window (e.g. 500 chars) vs. Semantic heading-aware | **Boundary- & Heading-Aware Semantic Chunking** | Fixed character splits frequently cut words and logical predicates in half. Splitting by Markdown headings/paragraphs preserves section context (e.g., "Parental Leave" or "Cache Resiliency"). |
-| **Retrieval Engine** | Pure dense vector vs. Pure BM25 vs. Hybrid | **Relevance-Scored Multi-Factor Retrieval** (Keyword + Heading + Phrase + Token Frequency) | Dense embeddings can fail on exact technical codes and numbers (e.g., "SEV-1", "PUE 1.14", "Redis 7.2"). Combining heading boosts, phrase matching, and token frequency delivers accurate recall for enterprise documentation without external infrastructure overhead. |
-| **Context Management** | Sending entire documents vs. Top-K passages | **Top-K Passages with Source Tags** | Providing targeted passages keeps latency low, prevents the "lost in the middle" attention degradation, and forces the model to cite exact document names. |
-| **Guardrails & Anti-Hallucination** | System prompt instructions, confidence thresholds, temperature tuning | **Low Temperature (0.2) + Explicit Negative Constraint** | Strict system instruction: if the retrieved passages do not contain the answer, explicitly state that the information was not found rather than improvising. |
-| **Observability** | Console logs vs. Inspectable UI telemetry | **Transparent Retrieval Inspection in UI** | Users can click "View retrieved RAG passages" beneath any assistant response to view the exact text snippets, chunk headings, and relevance scores retrieved by the backend. |
+
+**LLM Model** |**Gemini 3.8 Flash** (`@google/genai`)  
+The most integral part of this web application and every other RAG application is the ability for the application to reason efficiently. I have chosen Google’s Gemini 3.8 as it provides efficient reasoning capabilities whilst imploring low latency. The Gemini Pro and lite versions would have been sufficient if there was a requirement for autonomous agent planning and deep logic. As the goal is to not overengineer the adequate model for this project was Google’s Gemini 3.8
+
+The chosen approach to chunking allows texts to be split by headings and paragrpahs, so sentences and topics are never chopped in half. Hallucination is prevented by using a low-creativity setting, this tells the AI to say ‘information not found’ instead of guessing. The search process uses a hybrid approach and matches exact keywords and titles. In terms of Context management; targeted passages keeps latency low and prevents the "lost in the middle" attention degradation, and forces the model to cite exact document names. |
+
 
 ---
 
 ## 5. Key Technical Decisions & Tradeoffs
 
-1. **Python Flask + React SPA with Reverse Proxy**:
-   - *Decision*: We used Python for the RAG and document processing core and React for the client UI, coupled with an automated dev runner (`run-dev.js`) and unified production build script.
-   - *Tradeoff*: Running two runtimes in local development is managed seamlessly via an orchestration runner rather than requiring manual multi-terminal commands.
-2. **Deterministic pypdf + Gemini Multimodal OCR Fallback**:
-   - *Decision*: PDFs with raw text are extracted instantaneously via `pypdf` in memory with zero external API calls; scanned PDFs or images automatically fall back to Gemini's vision model for OCR.
-   - *Tradeoff*: Avoids heavy Tesseract C-dependencies while ensuring scanned documents do not fail silently.
-3. **In-Memory Semantic Chunk Store for MVP**:
-   - *Decision*: Maintained an in-memory chunk index for rapid zero-dependency demonstration and instant re-indexing upon upload or reset.
-   - *Tradeoff*: Ideal for single-instance MVPs; production would substitute `pgvector` or Pinecone for multi-instance persistence.
+•	  We used Python for the RAG and document processing core and React for the client UI, coupled with an automated dev runner (`run-dev.js`) and unified production build script. Running both services locally is handled by a single startup script, so you don’t need to open and manage multiple terminal windows
+ PDFs with raw text are extracted via `pypdf` PDFs or images automatically fall back to Gemini's vision model for OCR. The trade-off is that it keeps the setup simple and lightweight, while alerting users if a PDF is an image instead of selectable text.
+Document chunks were stored directly in memory, so search is instant and requires no external database setup. Fast and lightweight for single server use, but would be upgraded to a vector database for multi-server production scale.
+
+
 
 ---
 
-## 6. Engineering Standards Followed (and Consciously Deferred)
+## 6. Engineering Standards Followed 
 
 ### Standards Followed
-- **Strict TypeScript & Type Safety**: Centralized types in `src/types.ts` for all API payloads and UI state.
-- **Fail-Fast Error Handling**: User-facing toast notifications and non-blocking recovery for unparsable files or network errors.
-- **Graceful Degradation**: Preloaded sample enterprise documents (handbook, architecture spec, SRE runbook, ESG report) so the evaluator can test immediately without searching for test files.
-- **Accessible & Responsive UX**: High-contrast typography, clear keyboard shortcuts (`Enter` to submit), loading states, and mobile/desktop responsiveness.
+•	Ensured the app used Full TypeScript coverage across the app to prevent runtime bugs Type-Safe to ensure stability and prevent run time bugs. Built the app with a user friendly mindset guaranteeing layout was mobile/desktop friendly. I also ensured that error messages were displayed clearly and loading feedback.  The app has been preloaded with test documents so it can be tested right away  
 
-### Standards Consciously Deferred for MVP Scope
-- **Persistent User Accounts**: Skipped OAuth login to keep the reviewer's evaluation friction-free.
-- **Distributed Celery Queue**: Skipped asynchronous message broker infrastructure to keep the repository runnable with a single command.
+
 
 ---
 
 ## 7. How AI Tools Were Used in the Development Process
 
-- **Scaffolding & Boilerplate**: AI assistance was used to rapidly scaffold the initial React component structure and generate representative enterprise sample documents (SRE runbook, caching spec).
-- **Quality Verification & Refactoring**: AI was used to identify boundary failure points in text parsing (such as empty PDF streams and markdown split boundaries).
-- **Human Guidance & Code Ownership**:
-  - *Do's*: Kept architectural ownership, curated precise RAG scoring heuristics (phrase bonus, heading matching), and reviewed all generated code for maintainability.
-  - *Don'ts*: Avoided blindly accepting complex multi-layer abstractions or unneeded dependencies (e.g. avoided pulling in heavyweight frameworks like LangChain/LlamaIndex when a direct, readable 200-line Python implementation is faster, more transparent, and easier to debug).
+- I  used AI to quickly draft initial React components and generate realistic sample documents (like SRE runbooks and technical specs). Also used AI to spot tricky file-parsing bugs, such as blank PDFs or awkward text breaks. I rejected frameworks (like LangChain or LlamaIndex) in favor of a lightweight script that is faster and easier to debug. I owned the overall architecture, designed the search-ranking rules, and personally reviewed the  code for long-term clarity.
 
 ---
 
 ## 8. What Would Be Added With More Time
 
-1. **HyDE (Hypothetical Document Embeddings)**: Generate a hypothetical ideal answer first to improve semantic similarity matching against declarative document passages.
-2. **Parent-Document Retrieval**: Embed smaller 100-word chunks for precision matching, but retrieve and feed the full parent section (500 words) to the LLM for broader contextual reasoning.
-3. **Multi-Document Comparison Mode**: Allow users to select two documents side-by-side (e.g., Job Description vs. Candidate Resume or v1 vs. v2 architecture) with a structured diff view.
-4. **Automated RAG Evaluation (RAGAS / TruLens)**: Add automated evaluation metrics for Faithfulness, Answer Relevance, and Context Precision.
+I would have allowed the AI draft an ideal answer first, then use that draft to search for matching passages in the documents. A side-by-side document comparison: I would have also let users compare two files directly (e.g., a Job Description vs. a Resume, or v1 vs. v2 of a design spec) with a visual breakdown of differences. If there was more time it probably would have been helpful to use a tool like RAGAS or TruLens to grade how truthdul and relevant the AI answers are 
