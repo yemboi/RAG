@@ -1,6 +1,6 @@
-# Option 1: Chat With Your Docs — Full-Stack RAG Assistant
+#  Full-Stack RAG Assistant
 
-A clean, production-ready Retrieval-Augmented Generation (RAG) web application built with **Python (Flask)**, **React (TypeScript + Vite)**, and **Google Gemini (`gemini-3.8-flash`)**.
+For this task I have chosen option 1 and built a clean, production-ready Retrieval-Augmented Generation (RAG) web application. I have built this application using Python (Flask), React (TypeScript + Vite), and Google Gemini (`gemini-3.8-flash`).
 
 ---
 
